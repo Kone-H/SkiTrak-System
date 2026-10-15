@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>cs6650.a1</groupId>
+  <artifactId>client-part1</artifactId>
+  <version>1.0-SNAPSHOT</version>
+
+  <properties>
+    <maven.compiler.release>11</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <dependencies>
+    <!-- WebSocket client implementation (Lab2 Part6 echo-client).
+         1.x uses the javax.websocket package, matching Tomcat 9 -->
+    <dependency>
+      <groupId>org.glassfish.tyrus.bundles</groupId>
+      <artifactId>tyrus-standalone-client</artifactId>
+      <version>1.21</version>
+    </dependency>
+    <!-- Parses the leaderboard JSON to read serverTimestamp -->
+    <dependency>
+      <groupId>com.google.code.gson</groupId>
+      <artifactId>gson</artifactId>
+      <version>2.10.1</version>
+    </dependency>
+  </dependencies>
+</project>
