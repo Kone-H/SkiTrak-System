@@ -24,7 +24,6 @@ public class LoadClientMsg {
   private static final int WARMUP_TOTAL = WARMUP_THREADS * WARMUP_SWIPES_PER_THREAD;   // 32,000
 
   // Subscribe-path state, shared by the subscribers and main
-  // (Lab 2 Part 6: "pass state via a static or singleton")
   private static final AtomicBoolean ingestDone = new AtomicBoolean(false);
   private static final AtomicInteger[] updatesPerResort = new AtomicInteger[NUM_RESORTS];
   private static final AtomicInteger reconnections = new AtomicInteger();
@@ -76,7 +75,7 @@ public class LoadClientMsg {
     generator.join();   // the generator stops by itself after producing exactly TOTAL_SWIPES
   }
 
-  // Subscribe path (Lab 2 Part 6 pattern): one persistent WebSocket connection per resort
+  // Subscribe path
   private static void connectSubscribers(String baseUrl) throws Exception {
     String wsBaseUrl = baseUrl.replaceFirst("^http", "ws");   // http://... -> ws://...
     WebSocketContainer container = ContainerProvider.getWebSocketContainer();
@@ -93,7 +92,7 @@ public class LoadClientMsg {
     }
   }
 
-  // Close the subscriptions (Lab: session.close()); set ingestDone first so they don't reconnect
+  // Close the subscriptions  set ingestDone
   private static void closeSubscribers() throws IOException {
     ingestDone.set(true);
     for (Session session : sessions) {
@@ -176,7 +175,7 @@ public class LoadClientMsg {
     double predictedThroughput = mainThreads * 1000.0 / avgWaitTime;
     System.out.println();
     System.out.println("===== Little's Law: Predicted vs Actual (main phase) =====");
-    System.out.println("Warmup latency W:      " + avgWaitTime + " ms");
+    System.out.println("Warmup latency  :      " + avgWaitTime + " ms");
     System.out.printf("Predicted throughput:  %.1f swipes/s  (%d threads / W)%n",
         predictedThroughput, mainThreads);
     System.out.printf("Actual throughput:     %.1f swipes/s%n", actualThroughput);

@@ -52,7 +52,7 @@ public class LeaderboardEndpoint {
       Map<String, Object> row = new LinkedHashMap<>();
       vertical -= ThreadLocalRandom.current().nextInt(500,1000);
       row.put("rank", i);
-      row.put("skierID", ThreadLocalRandom.current().nextInt(1,10001));
+      row.put("skierID", ThreadLocalRandom.current().nextInt(1,100001));
       row.put("vertical", vertical);
       topN.add(row);
     }
@@ -70,7 +70,11 @@ public class LeaderboardEndpoint {
     for (Map.Entry<String, Set<Session>> e : subscribers.entrySet()) {
       String json = syntheticLeaderboard(e.getKey()); // canned/random top-N + serverTimestamp
       for (Session s : e.getValue()) {
-        if (s.isOpen()) s.getAsyncRemote().sendText(json);
+        try {
+          if (s.isOpen()) s.getAsyncRemote().sendText(json);
+        } catch (Exception ex) {
+          System.err.println("Push failed for session " + s.getId() + ": " + ex.getMessage());
+        }
       }
     }
   }
