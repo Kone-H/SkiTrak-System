@@ -1,0 +1,15 @@
+# macOS system files
+.DS_Store
+
+# Office temporary lock files (created while a file is open)
+~$*
+
+# IntelliJ IDEA project settings
+.idea/
+*.iml
+
+# Maven build output
+target/
+
+# Classpath file created by README Section 6.5
+cp.txt

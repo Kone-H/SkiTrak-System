@@ -8,8 +8,7 @@ SkiTrak-System/
 │                   # LeaderboardEndpoint (WS /leaderboard/{resortID})  → packaged as one WAR
 ├── client-part1/   # load client: warmup + main phase, HTTP ingest + WebSocket subscribe paths
 ├── client-part2/   # client-part1 + per-swipe latency CSV, statistics, throughput buckets
-├── results/        # CSV output of client-part2
-└── docs/           # diagrams and design doc
+├── results/        # CSV output of client-part2 and analysis
 ```
 
 ---
