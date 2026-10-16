@@ -2,7 +2,7 @@
   <configuration default="false" name="LoadClientMsg" type="Application" factoryName="Application">
     <option name="MAIN_CLASS_NAME" value="LoadClientMsg" />
     <module name="client-part1" />
-    <option name="PROGRAM_PARAMETERS" value="http://35.95.148.162:8080/ski-servlet 200" />
+    <option name="PROGRAM_PARAMETERS" value="http://35.92.248.145:8080/ski-servlet 64" />
     <method v="2">
       <option name="Make" enabled="true" />
     </method>

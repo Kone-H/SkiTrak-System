@@ -22,6 +22,7 @@ public class LoadClientMsg {
 
   private static final int WARMUP_SWIPES_PER_THREAD = 1000;
   private static final int WARMUP_TOTAL = WARMUP_THREADS * WARMUP_SWIPES_PER_THREAD;   // 32,000
+  private static final int TOMCAT_MAX_KEEPALIVE_REQUESTS = 100;   // Tomcat default maxKeepAliveRequests
 
   // Subscribe-path state, shared by the subscribers and main
   private static final AtomicBoolean ingestDone = new AtomicBoolean(false);
@@ -70,6 +71,7 @@ public class LoadClientMsg {
         sender.getFailureCount() - warmupFailed, mainMs, actualThroughput);
     printLittlesLaw(mainThreads, avgWaitTime, actualThroughput);
     printOverall(sender, warmupMs, mainMs);
+    printConnectionStats(mainThreads, sender);
     printSubscribeSummary();
 
     generator.join();   // the generator stops by itself after producing exactly TOTAL_SWIPES
@@ -190,6 +192,23 @@ public class LoadClientMsg {
     System.out.println("Failed:          " + sender.getFailureCount());
     System.out.println("Total wall time: " + totalMs + " ms  (warmup " + warmupMs + " ms + main " + mainMs + " ms)");
     System.out.printf("Throughput:      %.1f swipes/s%n", TOTAL_SWIPES * 1000.0 / totalMs);
+  }
+
+  // Required metric 5: connection statistics (connections, reconnections).
+  // HttpClient does not expose its pool, so the HTTP numbers come from the configuration:
+  // one keep-alive connection per sender thread, and Tomcat closes a keep-alive connection
+  // after 100 requests (maxKeepAliveRequests default), so the client reconnects about once
+  // every 100 swipes instead of once per swipe.
+  private static void printConnectionStats(int mainThreads, SwipeSender sender) {
+    int httpReconnects = sender.getSuccessCount() / TOMCAT_MAX_KEEPALIVE_REQUESTS;
+    System.out.println();
+    System.out.println("===== Connection Statistics =====");
+    System.out.println("HTTP connections:          1 shared HttpClient pool, up to "
+        + Math.max(WARMUP_THREADS, mainThreads) + " concurrent (one per sender thread)");
+    System.out.println("HTTP reconnections (est.): ~" + httpReconnects
+        + " (Tomcat closes a keep-alive connection every " + TOMCAT_MAX_KEEPALIVE_REQUESTS + " requests)");
+    System.out.println("WebSocket connections:     " + sessions.size());
+    System.out.println("WebSocket reconnections:   " + reconnections.get());
   }
 
   private static void printSubscribeSummary() {

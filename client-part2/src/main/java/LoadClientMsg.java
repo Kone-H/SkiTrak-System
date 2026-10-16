@@ -23,6 +23,7 @@ public class LoadClientMsg {
 
   private static final int WARMUP_SWIPES_PER_THREAD = 1000;
   private static final int WARMUP_TOTAL = WARMUP_THREADS * WARMUP_SWIPES_PER_THREAD;   // 32,000
+  private static final int TOMCAT_MAX_KEEPALIVE_REQUESTS = 100;   // Tomcat default maxKeepAliveRequests
 
   // Subscribe-path state, shared by the subscribers and main
   private static final AtomicBoolean ingestDone = new AtomicBoolean(false);
@@ -35,6 +36,7 @@ public class LoadClientMsg {
   // Part 2: one SwipeRecord per swipe, filled by all sender threads, written to CSV at the end
   private static final Queue<SwipeRecord> records = new ConcurrentLinkedQueue<>();
   private static final String OUTPUT_DIR = "../results/";   // results/ at the repo root
+  private static final int BUCKET_SECONDS = 10;               // throughput chart: one point per 10 s
 
   // Program arguments: <baseUrl> [mainThreads]
   public static void main(String[] args) throws Exception {
@@ -75,7 +77,11 @@ public class LoadClientMsg {
         sender.getFailureCount() - warmupFailed, mainMs, actualThroughput);
     printLittlesLaw(mainThreads, avgWaitTime, actualThroughput);
     printOverall(sender, warmupMs, mainMs);
+    printConnectionStats(mainThreads, sender);
     printSubscribeSummary();
+
+    // 5b. Part 2: per-swipe ingest latency statistics and throughput per resort
+    printIngestStats(warmupMs + mainMs);
 
     // 6. single writer: write every record to CSV after all sender threads are done
     String csvPath = OUTPUT_DIR + "swipes_" + mainThreads + "threads.csv";
@@ -83,6 +89,12 @@ public class LoadClientMsg {
     CsvWriter.writeSwipeRecords(records, csvPath);
     long writeMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - writeStart);
     printCsvSummary(csvPath, writeMs);
+
+    // 7. Part 2 visualization data: throughput in 10-second buckets, written to a second CSV
+    double[] throughputPerBucket = throughputPerBucket();
+    String bucketPath = OUTPUT_DIR + "throughput_" + mainThreads + "threads.csv";
+    CsvWriter.writeThroughputBuckets(throughputPerBucket, BUCKET_SECONDS, bucketPath);
+    printThroughputBuckets(throughputPerBucket, bucketPath);
 
     generator.join();   // the generator stops by itself after producing exactly TOTAL_SWIPES
   }
@@ -204,6 +216,23 @@ public class LoadClientMsg {
     System.out.printf("Throughput:      %.1f swipes/s%n", TOTAL_SWIPES * 1000.0 / totalMs);
   }
 
+  // Required metric 5: connection statistics (connections, reconnections).
+  // HttpClient does not expose its pool, so the HTTP numbers come from the configuration:
+  // one keep-alive connection per sender thread, and Tomcat closes a keep-alive connection
+  // after 100 requests (maxKeepAliveRequests default), so the client reconnects about once
+  // every 100 swipes instead of once per swipe.
+  private static void printConnectionStats(int mainThreads, SwipeSender sender) {
+    int httpReconnects = sender.getSuccessCount() / TOMCAT_MAX_KEEPALIVE_REQUESTS;
+    System.out.println();
+    System.out.println("===== Connection Statistics =====");
+    System.out.println("HTTP connections:          1 shared HttpClient pool, up to "
+        + Math.max(WARMUP_THREADS, mainThreads) + " concurrent (one per sender thread)");
+    System.out.println("HTTP reconnections (est.): ~" + httpReconnects
+        + " (Tomcat closes a keep-alive connection every " + TOMCAT_MAX_KEEPALIVE_REQUESTS + " requests)");
+    System.out.println("WebSocket connections:     " + sessions.size());
+    System.out.println("WebSocket reconnections:   " + reconnections.get());
+  }
+
   private static void printSubscribeSummary() {
     System.out.println();
     System.out.println("===== Subscribe Path (WebSocket leaderboard) =====");
@@ -224,12 +253,91 @@ public class LoadClientMsg {
     }
   }
 
+  // Part 2: statistics from the per-swipe records (measured latency, not the Little's Law estimate)
+  private static void printIngestStats(long totalMs) {
+    List<Long> latencies = new ArrayList<>();
+    int[] successPerResort = new int[NUM_RESORTS];
+    for (SwipeRecord record : records) {
+      if (record.getStatusCode() == 201) {   // only successful swipes count
+        latencies.add(record.getLatencyMs());
+        successPerResort[record.getResortID() - 1]++;
+      }
+    }
+
+    System.out.println();
+    System.out.println("===== Ingest Latency (measured per swipe) =====");
+    System.out.println("Swipes measured: " + latencies.size());
+    if (!latencies.isEmpty()) {
+      LatencyStats ingest = new LatencyStats(latencies);
+      System.out.printf("Mean:            %.1f ms%n", ingest.mean());
+      System.out.println("Median:          " + ingest.percentile(50) + " ms");
+      System.out.println("p95:             " + ingest.percentile(95) + " ms");
+      System.out.println("p99:             " + ingest.percentile(99) + " ms");
+      System.out.println("Min:             " + ingest.min() + " ms");
+      System.out.println("Max:             " + ingest.max() + " ms");
+    }
+
+    // throughput per resort = successful swipes for that resort / total wall time
+    double totalSeconds = totalMs / 1000.0;
+    System.out.println();
+    System.out.println("===== Throughput per Resort =====");
+    for (int r = 1; r <= NUM_RESORTS; r++) {
+      System.out.printf("Resort %2d: %6d swipes, %.1f swipes/s%n",
+          r, successPerResort[r - 1], successPerResort[r - 1] / totalSeconds);
+    }
+  }
+
   private static void printCsvSummary(String csvPath, long writeMs) throws IOException {
     System.out.println();
     System.out.println("===== Per-swipe CSV =====");
     System.out.println("Rows written:    " + records.size());
     System.out.println("File:            " + new File(csvPath).getCanonicalPath());
     System.out.println("Write time:      " + writeMs + " ms");
+  }
 
+  // Swipes completed per second, in BUCKET_SECONDS-wide buckets counted from the first send.
+  // A swipe belongs to the bucket in which its response arrived (send timestamp + latency).
+  private static double[] throughputPerBucket() {
+    long start = Long.MAX_VALUE;
+    long end = Long.MIN_VALUE;
+    for (SwipeRecord record : records) {
+      start = Math.min(start, record.getTimestamp());
+      end = Math.max(end, record.getTimestamp() + record.getLatencyMs());
+    }
+    long bucketMs = BUCKET_SECONDS * 1000L;
+    int numBuckets = (int) ((end - start) / bucketMs) + 1;
+
+    int[] completed = new int[numBuckets];
+    for (SwipeRecord record : records) {
+      if (record.getStatusCode() == 201) {   // only successful swipes count
+        long done = record.getTimestamp() + record.getLatencyMs();
+        completed[(int) ((done - start) / bucketMs)]++;
+      }
+    }
+
+    double[] throughput = new double[numBuckets];
+    for (int i = 0; i < numBuckets; i++) {
+      // the last bucket is usually shorter than BUCKET_SECONDS, so divide by its real length
+      long bucketStart = start + i * bucketMs;
+      double seconds = Math.min(bucketMs, end - bucketStart + 1) / 1000.0;
+      throughput[i] = completed[i] / seconds;
+    }
+    return throughput;
+  }
+
+  private static void printThroughputBuckets(double[] throughputPerBucket, String path)
+      throws IOException {
+    double peak = 0;
+    double lowest = Double.MAX_VALUE;
+    for (double t : throughputPerBucket) {
+      peak = Math.max(peak, t);
+      lowest = Math.min(lowest, t);
+    }
+    System.out.println();
+    System.out.println("===== Throughput over Time (" + BUCKET_SECONDS + " s buckets) =====");
+    System.out.println("Buckets:         " + throughputPerBucket.length);
+    System.out.printf("Peak bucket:     %.1f swipes/s%n", peak);
+    System.out.printf("Lowest bucket:   %.1f swipes/s%n", lowest);
+    System.out.println("File:            " + new File(path).getCanonicalPath());
   }
 }
